@@ -5,6 +5,11 @@ use interprocess::local_socket as ipc;
 use crate::ipc_common::{socket_name, Signals};
 
 pub fn run_control(args: Vec<String>) {
+    if args[0] == "start" {
+        crate::daemon::run_daemon();
+        return;
+    }
+
     let mut buffer = String::with_capacity(128);
 
     // Create our connection. This will block until the server accepts our connection, but will fail
