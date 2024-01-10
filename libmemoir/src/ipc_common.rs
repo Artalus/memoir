@@ -8,23 +8,25 @@ pub fn socket_name() -> String {
     }
 }
 
-pub enum Signals {
+pub enum Signal {
     Ack,
     Stop,
     Ping,
+    Save,
 }
 
-impl std::fmt::Display for Signals {
+impl std::fmt::Display for Signal {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Signals::Ack => write!(f, "Ack"),
-            Signals::Stop => write!(f, "Stop"),
-            Signals::Ping => write!(f, "Ping"),
+            Signal::Ack => write!(f, "Ack"),
+            Signal::Stop => write!(f, "Stop"),
+            Signal::Ping => write!(f, "Ping"),
+            Signal::Save => write!(f, "Save"),
         }
     }
 }
 
-impl Signals {
+impl Signal {
     pub fn as_cmdline(&self) -> Vec<u8> {
         format!("{}\n", self).as_bytes().to_vec()
     }

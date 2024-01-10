@@ -1,5 +1,7 @@
 use std::collections::VecDeque;
+use std::ffi::OsString;
 use std::io::{BufReader, ErrorKind, Result};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{Sender, Receiver, RecvTimeoutError};
 use std::thread;
@@ -7,7 +9,7 @@ use std::time::Duration;
 
 use interprocess::local_socket as ipc;
 
-use crate::ipc_common::{socket_name, Signals};
+use crate::ipc_common::{socket_name, Signal};
 use crate::process::{CurrentProcesses, list_processes};
 
 type ProcessHistory = Arc<Mutex<VecDeque<CurrentProcesses>>>;
@@ -75,7 +77,7 @@ fn listing_should_continue(finish_rcv: &Receiver<()>, timeout: Duration) -> bool
     }
 }
 
-fn ipc_listen(finish_snd: Sender<()>, listener: ipc::LocalSocketListener, _history: ProcessHistory) {
+fn ipc_listen(finish_snd: Sender<()>, listener: ipc::LocalSocketListener, history: ProcessHistory) {
     println!("daemon started");
 
     // Preemptively allocate a sizeable buffer for reading at a later moment. This size should be
@@ -103,7 +105,7 @@ fn ipc_listen(finish_snd: Sender<()>, listener: ipc::LocalSocketListener, _histo
         // Now that the read has come through and the client is waiting on the server's write, do
         // it. (`.get_mut()` is to get the writer, `BufReader` doesn't implement a pass-through
         // `Write`.)
-        if let Err(e) = reader.get_mut().write_all(&Signals::Ack.as_cmdline()) {
+        if let Err(e) = reader.get_mut().write_all(&Signal::Ack.as_cmdline()) {
             eprintln!("Error: write_all failed: {}", e);
             break;
         }
@@ -112,9 +114,25 @@ fn ipc_listen(finish_snd: Sender<()>, listener: ipc::LocalSocketListener, _histo
         eprintln!("Client sent: '{}'", buffer);
 
         // Let's add an exit condition to shut the server down gracefully.
-        if buffer.as_bytes() == Signals::Stop.as_cmdline() {
+        if buffer.as_bytes() == Signal::Stop.as_cmdline() {
             finish_snd.send(()).expect("Error: could not send stop signal");
             break;
+        }
+        if buffer.as_bytes() == Signal::Save.as_cmdline() {
+            let mut len_buffer: [u8; 8] = [0; 8];
+            reader.read_exact(&mut len_buffer).expect("Error: could not read save argument length");
+            let arg_len = u64::from_be_bytes(len_buffer);
+            let mut arg_buffer: Vec<u8> = vec![0; arg_len as usize];
+            reader.read_exact(&mut arg_buffer).expect("Error: could not read save argument");
+            let arg = unsafe { OsString::from_encoded_bytes_unchecked(arg_buffer) };
+            eprintln!("Saving current process info to {:?}...", arg);
+            use std::fs::File;
+            let filepath = PathBuf::from(arg).as_path().to_owned();
+            let mut f = File::create(filepath).expect("Error: could not create file");
+            for entry in history.lock().unwrap().iter() {
+                write!(f, "{}", entry).expect("Error: could not write to file");
+            }
+
         }
 
         // Clear the buffer so that the next iteration will display new data instead of messages
