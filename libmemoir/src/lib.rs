@@ -12,3 +12,8 @@ mod tests {
         assert_eq!(result, 4);
     }
 }
+
+pub mod control;
+pub mod daemon;
+mod ipc_common;
+mod process;
