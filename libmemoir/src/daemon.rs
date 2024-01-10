@@ -26,10 +26,6 @@ pub fn run_daemon() {
         Ok(i) => i,
     };
     run_process_list_daemon(rcv, history.clone());
-    println!("Current history:");
-    for x in history.lock().unwrap().iter() {
-        println!("{}", x);
-    }
     ipc.join().unwrap();
 }
 
