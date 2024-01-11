@@ -1,10 +1,10 @@
 use std::vec::Vec;
 
 pub struct Process {
-    pid: i32,
-    name: String,
-    memory_mb: u64,
-    commandline: String,
+    pub pid: i32,
+    pub name: String,
+    pub memory_mb: u64,
+    pub commandline: String,
 }
 
 impl std::fmt::Display for Process {
@@ -14,8 +14,8 @@ impl std::fmt::Display for Process {
 }
 
 pub struct CurrentProcesses {
-    timestamp: u128,
-    processes: Vec<Process>,
+    pub timestamp: u128,
+    pub processes: Vec<Process>,
 }
 impl std::fmt::Display for CurrentProcesses {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {

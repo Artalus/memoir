@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use interprocess::local_socket as ipc;
 
+use crate::csvdump::save_to_csv;
 use crate::ipc_common::{socket_name, Signal};
 use crate::process::{CurrentProcesses, list_processes};
 
@@ -126,13 +127,8 @@ fn ipc_listen(finish_snd: Sender<()>, listener: ipc::LocalSocketListener, histor
             reader.read_exact(&mut arg_buffer).expect("Error: could not read save argument");
             let arg = unsafe { OsString::from_encoded_bytes_unchecked(arg_buffer) };
             eprintln!("Saving current process info to {:?}...", arg);
-            use std::fs::File;
-            let filepath = PathBuf::from(arg).as_path().to_owned();
-            let mut f = File::create(filepath).expect("Error: could not create file");
-            for entry in history.lock().unwrap().iter() {
-                write!(f, "{}", entry).expect("Error: could not write to file");
-            }
-
+            save_to_csv(&history.lock().unwrap(), &PathBuf::from(arg))
+                .expect("Could not dump process history to CSV");
         }
 
         // Clear the buffer so that the next iteration will display new data instead of messages
