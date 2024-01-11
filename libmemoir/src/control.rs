@@ -1,9 +1,12 @@
-use std::io::BufReader;
+use std::{collections::HashSet, io::BufReader};
 
 use anyhow::Context;
 use interprocess::local_socket as ipc;
 
-use crate::{ipc_common::{socket_name, Signal}, process::list_processes};
+use crate::{
+    ipc_common::{socket_name, Signal},
+    process::{list_processes, Process},
+};
 
 type Result = anyhow::Result<()>;
 
@@ -31,7 +34,8 @@ fn do_ping() -> Result {
 }
 
 fn do_once() {
-    let lp = list_processes();
+    let mut cache: HashSet<std::sync::Arc<Process>> = HashSet::with_capacity(1000);
+    let lp = list_processes(&mut cache);
     println!("Processes: {}", lp);
 }
 

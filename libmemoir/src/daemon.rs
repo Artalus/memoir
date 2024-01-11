@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::ffi::OsString;
 use std::io::{BufReader, ErrorKind, Result};
 use std::path::PathBuf;
@@ -11,10 +11,11 @@ use interprocess::local_socket as ipc;
 
 use crate::csvdump::save_to_csv;
 use crate::ipc_common::{socket_name, Signal};
-use crate::process::{CurrentProcesses, list_processes};
+use crate::process::{CurrentProcesses, list_processes, Process};
 
 type ProcessHistory = Arc<Mutex<VecDeque<CurrentProcesses>>>;
 const HISTORY_CAPACITY: usize = 3600;
+const CLEANUP_INTERVAL: usize = 100;
 
 pub fn run_daemon() {
     let history = Arc::new(Mutex::new(VecDeque::with_capacity(HISTORY_CAPACITY)));
@@ -55,13 +56,20 @@ pub fn fork_ipc(finish_snd: Sender<()>, process_history: ProcessHistory) -> Resu
 }
 
 pub fn run_process_list_daemon(finish_rcv: Receiver<()>, history: ProcessHistory) {
+    let mut cache: HashSet<Arc<Process>> = HashSet::with_capacity(1000);
+    let mut cleanup_tick = 0;
     // 1 second wait between process polls is done via recv() timeout
     while listing_should_continue(&finish_rcv, Duration::new(1, 0)) {
+        cleanup_tick += 1;
         let mut locked = history.lock().unwrap();
-        if locked.len() >= HISTORY_CAPACITY {
+        locked.push_back(list_processes(&mut cache));
+        if locked.len() > HISTORY_CAPACITY {
             locked.pop_front();
         }
-        locked.push_back(list_processes());
+        if cleanup_tick >= CLEANUP_INTERVAL {
+            cleanup_tick = 0;
+            cache.retain(|c| Arc::strong_count(c) > 1);
+        }
     }
 }
 
