@@ -22,11 +22,27 @@ jobs:
       run: cargo test --verbose
     - name: Linters
       run: |
-        set +e
-        cargo fix -- -DWarnings
-        fix_code=$?
-        cargo clippy -- -DWarnings
-        clippy_code=$?
-        if [ $fix_code -ne 0 ] || [ $clippy_code -ne 0 ]; then
-            exit 1
+        set -ex
+        pip install pre-commit
+        # github does not have branch names, and BASE_REF is a name, not a SHA
+        git fetch
+        if [ -n "$GITHUB_BASE_REF" ]; then
+          pre-commit run \
+            --verbose \
+            --show-diff-on-failure \
+            --from-ref=${{ github.event.pull_request.base.sha }} \
+            --to-ref=${{ github.event.pull_request.head.sha }}
+        else
+          pre-commit run \
+            --verbose \
+            --show-diff-on-failure \
+            --all-files
         fi
+        # set +e
+        # cargo fix -- -DWarnings
+        # fix_code=$?
+        # cargo clippy -- -DWarnings
+        # clippy_code=$?
+        # if [ $fix_code -ne 0 ] || [ $clippy_code -ne 0 ]; then
+        #     exit 1
+        # fi
