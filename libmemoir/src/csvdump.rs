@@ -31,5 +31,5 @@ pub fn save_to_csv(
 }
 
 fn escape_cmdline(cmdline: &str) -> String {
-    cmdline.replace("\t", "\\t")
+    cmdline.replace("\t", "\\t").replace("\n", "\\n")
 }
