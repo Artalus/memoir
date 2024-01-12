@@ -30,7 +30,4 @@ impl Signal {
     pub fn as_cmdline(&self) -> Vec<u8> {
         format!("{}\n", self).as_bytes().to_vec()
     }
-    pub fn as_string(&self) -> String {
-        format!("{}", self).to_string()
-    }
 }

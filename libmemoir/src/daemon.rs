@@ -2,8 +2,8 @@ use std::collections::{HashSet, VecDeque};
 use std::ffi::OsString;
 use std::io::{BufReader, ErrorKind, Result};
 use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
-use std::sync::mpsc::{Sender, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
 
@@ -11,7 +11,7 @@ use interprocess::local_socket as ipc;
 
 use crate::csvdump::save_to_csv;
 use crate::ipc_common::{socket_name, Signal};
-use crate::process::{CurrentProcesses, list_processes, Process};
+use crate::process::{list_processes, CurrentProcesses, Process};
 
 type ProcessHistory = Arc<Mutex<VecDeque<CurrentProcesses>>>;
 const HISTORY_CAPACITY: usize = 3600;
@@ -26,14 +26,17 @@ pub fn run_daemon() {
         Err(e) => {
             println!("Error: failed to setup IPC: {}", e);
             return;
-        },
+        }
         Ok(i) => i,
     };
     run_process_list_daemon(rcv, history.clone());
     ipc.join().unwrap();
 }
 
-pub fn fork_ipc(finish_snd: Sender<()>, process_history: ProcessHistory) -> Result<thread::JoinHandle<()>> {
+pub fn fork_ipc(
+    finish_snd: Sender<()>,
+    process_history: ProcessHistory,
+) -> Result<thread::JoinHandle<()>> {
     let listener = match ipc::LocalSocketListener::bind(socket_name()) {
         Err(e) if e.kind() == ErrorKind::AddrInUse => {
             // TODO: detect if other instance of memoir is actually running
@@ -76,13 +79,11 @@ pub fn run_process_list_daemon(finish_rcv: Receiver<()>, history: ProcessHistory
 fn listing_should_continue(finish_rcv: &Receiver<()>, timeout: Duration) -> bool {
     match finish_rcv.recv_timeout(timeout) {
         Ok(_) => false,
-        Err(RecvTimeoutError::Timeout) => {
-            true
-        },
+        Err(RecvTimeoutError::Timeout) => true,
         Err(RecvTimeoutError::Disconnected) => {
             eprintln!("Error: receiver's counterpart disconnected!");
             false
-        },
+        }
     }
 }
 
@@ -124,17 +125,26 @@ fn ipc_listen(finish_snd: Sender<()>, listener: ipc::LocalSocketListener, histor
 
         // Let's add an exit condition to shut the server down gracefully.
         if buffer.as_bytes() == Signal::Stop.as_cmdline() {
-            finish_snd.send(()).expect("Error: could not send stop signal");
+            finish_snd
+                .send(())
+                .expect("Error: could not send stop signal");
             break;
         }
         if buffer.as_bytes() == Signal::Save.as_cmdline() {
             let mut len_buffer: [u8; 8] = [0; 8];
-            reader.read_exact(&mut len_buffer).expect("Error: could not read save argument length");
+            reader
+                .read_exact(&mut len_buffer)
+                .expect("Error: could not read save argument length");
             let arg_len = u64::from_be_bytes(len_buffer);
             let mut arg_buffer: Vec<u8> = vec![0; arg_len as usize];
-            reader.read_exact(&mut arg_buffer).expect("Error: could not read save argument");
+            reader
+                .read_exact(&mut arg_buffer)
+                .expect("Error: could not read save argument");
             let arg = unsafe { OsString::from_encoded_bytes_unchecked(arg_buffer) };
-            reader.get_mut().write_all(&Signal::Ack.as_cmdline()).expect("Error: could not write ack on arg");
+            reader
+                .get_mut()
+                .write_all(&Signal::Ack.as_cmdline())
+                .expect("Error: could not write ack on arg");
 
             eprintln!("Saving current process info to {:?}...", arg);
             save_to_csv(&history.lock().unwrap(), &PathBuf::from(arg))
