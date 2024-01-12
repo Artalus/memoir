@@ -134,6 +134,8 @@ fn ipc_listen(finish_snd: Sender<()>, listener: ipc::LocalSocketListener, histor
             let mut arg_buffer: Vec<u8> = vec![0; arg_len as usize];
             reader.read_exact(&mut arg_buffer).expect("Error: could not read save argument");
             let arg = unsafe { OsString::from_encoded_bytes_unchecked(arg_buffer) };
+            reader.get_mut().write_all(&Signal::Ack.as_cmdline()).expect("Error: could not write ack on arg");
+
             eprintln!("Saving current process info to {:?}...", arg);
             save_to_csv(&history.lock().unwrap(), &PathBuf::from(arg))
                 .expect("Could not dump process history to CSV");

@@ -79,7 +79,7 @@ fn communicate(signal: Signal, arg: &[u8]) -> Result {
         let arg_length = (arg.len() as u64).to_be_bytes();
         reader.get_mut().write(&arg_length).context("Could not write argument length to server")?;
         reader.get_mut().write(arg).context("Could not write argument to server")?;
-        reader.read_line(&mut buffer).context("Reading server response failed")?;
+        reader.read_line(&mut buffer).context("Reading server response to arg failed")?;
         // if buffer.as_bytes() == Signal::Ack.as_cmdline() {
         println!("-- server answered on arg: '{}'", buffer);
     }
