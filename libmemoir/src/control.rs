@@ -1,9 +1,10 @@
 use std::{collections::HashSet, io::BufReader};
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use interprocess::local_socket as ipc;
 
 use crate::{
+    daemon,
     ipc_common::{socket_name, Signal},
     process::{list_processes, Process},
 };
@@ -16,27 +17,115 @@ pub fn run_control(args: Vec<String>) -> Result {
             do_once();
             Ok(())
         }
-        "start" => {
-            do_start();
-            Ok(())
-        }
+        "detach" => do_detach(),
+        "run" => do_run(true),
+        // TODO: secret option just to undo check? oof.
+        "daemon" => do_run(false),
         "stop" => do_stop(),
-        "ping" => do_ping(),
+        "status" => do_status(),
         "save" => do_save(&args[1..]),
         _ => Err(anyhow::Error::msg(format!("Unknown command: {}", args[0]))),
     }
 }
 
-fn do_start() {
-    crate::daemon::run_daemon();
+fn do_detach() -> Result {
+    match daemon::check_socket_status() {
+        Ok(daemon::PingResult::DaemonExists) => {
+            eprintln!("Daemon already active.");
+            return Ok(());
+        }
+        Ok(daemon::PingResult::DaemonNotFound) => {}
+        Ok(daemon::PingResult::SocketOccupied) => {
+            return Err(anyhow!("Socket bound to some other program."))
+        }
+        Err(e) => return Err(e).context("Unexpected error during initial check"),
+    }
+
+    use std::process::Command;
+    let exe = std::env::current_exe().context("Could not get current executable path")?;
+    let mut child = Command::new(exe)
+        .args(["daemon"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("Could not spawn child daemon process")?;
+    let mut await_spawn_attempts = 0;
+    let mut last_error: anyhow::Error;
+    loop {
+        await_spawn_attempts += 1;
+        match child.try_wait() {
+            Ok(None) => {} // process is running, all good
+            Ok(Some(s)) => {
+                return Err(anyhow!(
+                    "Daemon exited with code {s}.\n\
+                You can try to restart it without detaching to see the output:\n\
+                \x20   memoirctl run"
+                ))
+            }
+            Err(e) => {
+                eprintln!("Error: could not check daemon exit status: {}", e);
+                // do not exit though, as our main indicator is ping response
+            }
+        }
+
+        // give child 1ms to init
+        std::thread::sleep(std::time::Duration::new(0, 1_000_000));
+
+        match communicate(Signal::Ping, b"") {
+            Ok(_) => break,
+            Err(e) => {
+                // errors are allowed to occur at first, if the daemon hadn't yet bound
+                // the socket
+                last_error = e
+            }
+        }
+        if await_spawn_attempts == 5 {
+            return Err(last_error).context("Daemon did not spawn after 5 attempts");
+        }
+        eprintln!("Daemon did not answer to ping, waiting...");
+        std::thread::sleep(std::time::Duration::new(1, 0));
+    }
+    eprintln!("Daemon started.");
+    Ok(())
+}
+
+fn do_run(as_daemon: bool) -> Result {
+    if as_daemon {
+        match daemon::check_socket_status() {
+            Ok(daemon::PingResult::DaemonExists) => return Err(anyhow!("Daemon already active.")),
+            Ok(daemon::PingResult::DaemonNotFound) => {}
+            Ok(daemon::PingResult::SocketOccupied) => {
+                return Err(anyhow!("Socket bound to some other program."))
+            }
+            Err(e) => return Err(e).context("Unexpected error during initial check"),
+        }
+        let tmp = std::env::temp_dir();
+        std::env::set_current_dir(&tmp).context(format!(
+            "Could not change directory to temporary dir {:?}",
+            tmp
+        ))?;
+    }
+    daemon::run_daemon();
+    Ok(())
 }
 
 fn do_stop() -> Result {
     communicate(Signal::Stop, b"")
 }
 
-fn do_ping() -> Result {
-    communicate(Signal::Ping, b"")
+fn do_status() -> Result {
+    // TODO: this is more complex than just ping, rename to `status` or smth
+    match daemon::check_socket_status() {
+        Ok(daemon::PingResult::DaemonExists) => {
+            eprintln!("Daemon active.");
+            Ok(())
+        }
+        Ok(daemon::PingResult::DaemonNotFound) => Err(anyhow!("Daemon not running.")),
+        Ok(daemon::PingResult::SocketOccupied) => {
+            Err(anyhow!("Socket bound to some other program."))
+        }
+        Err(e) => Err(e).context("Unexpected error during ping"),
+    }
 }
 
 fn do_once() {

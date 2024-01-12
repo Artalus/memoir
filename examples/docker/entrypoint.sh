@@ -1,6 +1,6 @@
 #!/bin/bash
 set -ex
-./memoirctl start &
+./memoirctl run &
 CONAN_HOME="$(pwd)/.conan2"
 export CONAN_HOME
 conan profile detect

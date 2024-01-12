@@ -17,6 +17,13 @@ type ProcessHistory = Arc<Mutex<VecDeque<CurrentProcesses>>>;
 const HISTORY_CAPACITY: usize = 3600;
 const CLEANUP_INTERVAL: usize = 100;
 
+pub enum PingResult {
+    DaemonExists,
+    DaemonNotFound,
+    SocketOccupied,
+}
+
+/// Run a daemon-server listening to a LocalSocket. Blocks until the daemon is stopped.
 pub fn run_daemon() {
     let history = Arc::new(Mutex::new(VecDeque::with_capacity(HISTORY_CAPACITY)));
 
@@ -33,7 +40,45 @@ pub fn run_daemon() {
     ipc.join().unwrap();
 }
 
-pub fn fork_ipc(
+pub fn check_socket_status() -> anyhow::Result<PingResult> {
+    use anyhow::Context;
+    let socket_name = socket_name();
+    {
+        match ipc::LocalSocketListener::bind(socket_name.clone()) {
+            // if we could bind to socket, the daemon defo does not exist
+            Ok(_) => return Ok(PingResult::DaemonNotFound),
+            // if addr is in use, there might be a chance it is occupied by something alien
+            Err(e) if e.kind() == ErrorKind::AddrInUse => {}
+            // any other error might prevent us from binding to the socket later
+            Err(e) => {
+                return Err(e).context(format!("Unable to bind socket {}", socket_name));
+            }
+        }
+    }
+    // attempt to ping the socket to ensure it is occupied by our daemon
+    let mut buffer = String::with_capacity(128);
+    let conn = ipc::LocalSocketStream::connect(socket_name.clone())
+        .context(format!("Unable to connect to socket {}", socket_name))?;
+    let mut reader = BufReader::new(conn);
+
+    // to access write_all/read_line
+    use std::io::prelude::*;
+
+    reader
+        .get_mut()
+        .write_all(&Signal::Ping.as_cmdline())
+        .context("Unable to send ping to daemon")?;
+
+    reader
+        .read_line(&mut buffer)
+        .context("Unable to receive pong from daemon")?;
+    if buffer.as_bytes() == Signal::Ack.as_cmdline() {
+        return Ok(PingResult::DaemonExists);
+    }
+    Ok(PingResult::SocketOccupied)
+}
+
+fn fork_ipc(
     finish_snd: Sender<()>,
     process_history: ProcessHistory,
 ) -> Result<thread::JoinHandle<()>> {
