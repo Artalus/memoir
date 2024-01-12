@@ -61,12 +61,12 @@ mod platform_specific {
         // panic if cannot list processes at all - this is unexpected
         for prc in procfs::process::all_processes().unwrap() {
             // but silently ignore everything we cannot access - processes may die
-            if let Err(_) = prc {
+            if prc.is_err() {
                 continue;
             }
             let prc = prc.unwrap();
             let stat = prc.stat();
-            if let Err(_) = stat {
+            if stat.is_err() {
                 continue;
             }
             let stat = stat.unwrap();

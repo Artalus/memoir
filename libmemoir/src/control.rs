@@ -12,8 +12,14 @@ type Result = anyhow::Result<()>;
 
 pub fn run_control(args: Vec<String>) -> Result {
     match args[0].as_str() {
-        "once" => Ok(do_once()),
-        "start" => Ok(do_start()),
+        "once" => {
+            do_once();
+            Ok(())
+        },
+        "start" => {
+            do_start();
+            Ok(())
+        },
         "stop" => do_stop(),
         "ping" => do_ping(),
         "save" => do_save(&args[1..]),
@@ -40,7 +46,7 @@ fn do_once() {
 }
 
 fn do_save(args: &[String]) -> Result {
-    if args.len() < 1 {
+    if args.is_empty() {
         eprintln!("Error: save requires a file name");
     }
     let file = std::env::current_dir()
@@ -54,7 +60,7 @@ fn do_save(args: &[String]) -> Result {
     }
     let filename = file.as_os_str();
     println!("-- requesting save to {:?}", filename);
-    communicate(Signal::Save, &filename.as_encoded_bytes())
+    communicate(Signal::Save, filename.as_encoded_bytes())
 }
 
 fn communicate(signal: Signal, arg: &[u8]) -> Result {
@@ -75,7 +81,7 @@ fn communicate(signal: Signal, arg: &[u8]) -> Result {
     // if buffer.as_bytes() == Signal::Ack.as_cmdline() {
     println!("-- server answered: '{}'", buffer);
 
-    if arg.len() > 0 {
+    if !arg.is_empty() {
         let arg_length = (arg.len() as u64).to_be_bytes();
         reader.get_mut().write(&arg_length).context("Could not write argument length to server")?;
         reader.get_mut().write(arg).context("Could not write argument to server")?;

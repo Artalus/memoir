@@ -2,7 +2,6 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 
 use anyhow::Context;
-use csv;
 
 use crate::process::CurrentProcesses;
 
@@ -14,7 +13,7 @@ pub fn save_to_csv(
         .delimiter(b'\t')
         .from_path(destination)
         .context(format!("Could not create CSV writer for {:?}", destination))?;
-    writer.write_record(&["Iteration", "Timestamp", "PID", "Name", "Memory MB", "Command line"])?;
+    writer.write_record(["Iteration", "Timestamp", "PID", "Name", "Memory MB", "Command line"])?;
     for (iteration, processes) in history.iter().enumerate() {
         for entry in &processes.entries {
             writer.write_record(&[
@@ -31,5 +30,5 @@ pub fn save_to_csv(
 }
 
 fn escape_cmdline(cmdline: &str) -> String {
-    cmdline.replace("\t", "\\t").replace("\n", "\\n")
+    cmdline.replace('\t', "\\t").replace('\n', "\\n")
 }
