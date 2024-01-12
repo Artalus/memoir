@@ -13,7 +13,14 @@ pub fn save_to_csv(
         .delimiter(b'\t')
         .from_path(destination)
         .context(format!("Could not create CSV writer for {:?}", destination))?;
-    writer.write_record(["Iteration", "Timestamp", "PID", "Name", "Memory MB", "Command line"])?;
+    writer.write_record([
+        "Iteration",
+        "Timestamp",
+        "PID",
+        "Name",
+        "Memory MB",
+        "Command line",
+    ])?;
     for (iteration, processes) in history.iter().enumerate() {
         for entry in &processes.entries {
             writer.write_record(&[
