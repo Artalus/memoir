@@ -11,24 +11,7 @@ use crate::{
 
 type Result = anyhow::Result<()>;
 
-pub fn run_control(args: Vec<String>) -> Result {
-    match args[0].as_str() {
-        "once" => {
-            do_once();
-            Ok(())
-        }
-        "detach" => do_detach(),
-        "run" => do_run(true),
-        // TODO: secret option just to undo check? oof.
-        "daemon" => do_run(false),
-        "stop" => do_stop(),
-        "status" => do_status(),
-        "save" => do_save(&args[1..]),
-        _ => Err(anyhow::Error::msg(format!("Unknown command: {}", args[0]))),
-    }
-}
-
-fn do_detach() -> Result {
+pub fn do_detach() -> Result {
     match daemon::check_socket_status() {
         Ok(daemon::PingResult::DaemonExists) => {
             eprintln!("Daemon already active.");
@@ -44,7 +27,7 @@ fn do_detach() -> Result {
     use std::process::Command;
     let exe = std::env::current_exe().context("Could not get current executable path")?;
     let mut child = Command::new(exe)
-        .args(["daemon"])
+        .args(["run", "--without-checks"])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
@@ -89,7 +72,7 @@ fn do_detach() -> Result {
     Ok(())
 }
 
-fn do_run(as_daemon: bool) -> Result {
+pub fn do_run(as_daemon: bool) -> Result {
     if as_daemon {
         match daemon::check_socket_status() {
             Ok(daemon::PingResult::DaemonExists) => return Err(anyhow!("Daemon already active.")),
@@ -109,11 +92,11 @@ fn do_run(as_daemon: bool) -> Result {
     Ok(())
 }
 
-fn do_stop() -> Result {
+pub fn do_stop() -> Result {
     communicate(Signal::Stop, b"")
 }
 
-fn do_status() -> Result {
+pub fn do_status() -> Result {
     // TODO: this is more complex than just ping, rename to `status` or smth
     match daemon::check_socket_status() {
         Ok(daemon::PingResult::DaemonExists) => {
@@ -128,20 +111,16 @@ fn do_status() -> Result {
     }
 }
 
-fn do_once() {
+pub fn do_once() {
     let mut cache: HashSet<std::sync::Arc<Process>> = HashSet::with_capacity(1000);
     let lp = list_processes(&mut cache);
     println!("Processes: {}", lp);
 }
 
-fn do_save(args: &[String]) -> Result {
-    if args.is_empty() {
-        eprintln!("Error: save requires a file name");
-    }
+pub fn do_save(to: &String) -> Result {
     let file = std::env::current_dir()
         .context("Could not get current directory")?
-        .join(&args[0]);
-    // .context(format!("Failed to resolve file name for '{}'", &args[0]))?;
+        .join(&to);
     let parent = file.parent().unwrap();
     let parentname = parent.as_os_str().to_os_string();
     if !parent.exists() {

@@ -1,26 +1,49 @@
 extern crate memoir;
 
-use std::env;
+use clap::{Parser, Subcommand};
+
+/// Memoir is a small tool to monitor current RAM consumption on per-process basis
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// get current RAM info, print and exit
+    Once,
+    /// start RAM monitoring
+    Run {
+        #[arg(short, long)]
+        without_checks: bool,
+    },
+    /// start as a detached daemon
+    Detach,
+    /// stop a running daemon
+    Stop,
+    /// check if daemon is running
+    Status,
+    /// save collected RAM report to a file
+    Save {
+        /// path to save to
+        path: String,
+    },
+}
 
 pub fn main() -> anyhow::Result<()> {
-    let args: Vec<String> = env::args().collect();
+    let args = Args::parse();
 
-    if args.len() > 1 {
-        memoir::control::run_control(args[1..].to_vec())
-    } else {
-        // x20 is ansi space, to keep indentation in each line
-        println!(
-            "Memoir is a small tool to monitor current RAM consumption on per-process basis\n\
-        Usage:\n\
-        \x20   {0} once        - get current RAM info, print and exit\n\
-        \x20   {0} run         - start RAM monitoring\n\
-        \x20   {0} detach      - start as a detached daemon\n\
-        \x20   {0} stop        - stop a running daemon \n\
-        \x20   {0} status      - check if daemon is running\n\
-        \x20   {0} save <path> -
-        ",
-            args[0]
-        );
-        Ok(())
+    match &args.command {
+        Commands::Once => {
+            memoir::control::do_once();
+            Ok(())
+        }
+        Commands::Detach => memoir::control::do_detach(),
+        Commands::Run { without_checks } => memoir::control::do_run(!without_checks),
+        Commands::Stop => memoir::control::do_stop(),
+        Commands::Status => memoir::control::do_status(),
+        Commands::Save { path } => memoir::control::do_save(path),
     }
 }
