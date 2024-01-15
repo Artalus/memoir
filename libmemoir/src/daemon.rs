@@ -1,12 +1,13 @@
 use std::collections::{HashSet, VecDeque};
 use std::ffi::OsString;
-use std::io::{BufReader, ErrorKind, Result};
+use std::io::{BufReader, ErrorKind};
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use anyhow::{anyhow, Context, Result};
 use interprocess::local_socket as ipc;
 
 use crate::csvdump::save_to_csv;
@@ -24,24 +25,16 @@ pub enum PingResult {
 }
 
 /// Run a daemon-server listening to a LocalSocket. Blocks until the daemon is stopped.
-pub fn run_daemon() {
+pub fn run_daemon() -> Result<()> {
     let history = Arc::new(Mutex::new(VecDeque::with_capacity(HISTORY_CAPACITY)));
 
     let (snd, rcv) = std::sync::mpsc::channel();
-    let ipce = fork_ipc(snd, history.clone());
-    let ipc = match ipce {
-        Err(e) => {
-            println!("Error: failed to setup IPC: {}", e);
-            return;
-        }
-        Ok(i) => i,
-    };
-    run_process_list_daemon(rcv, history.clone());
-    ipc.join().unwrap();
+    let ipc = fork_ipc(snd, history.clone()).context("Error: failed to setup IPC")?;
+    run_process_list_daemon(rcv, history.clone())?;
+    ipc.join().unwrap()
 }
 
-pub fn check_socket_status() -> anyhow::Result<PingResult> {
-    use anyhow::Context;
+pub fn check_socket_status() -> Result<PingResult> {
     let socket_name = socket_name();
     {
         match ipc::LocalSocketListener::bind(socket_name.clone()) {
@@ -81,7 +74,7 @@ pub fn check_socket_status() -> anyhow::Result<PingResult> {
 fn fork_ipc(
     finish_snd: Sender<()>,
     process_history: ProcessHistory,
-) -> Result<thread::JoinHandle<()>> {
+) -> Result<thread::JoinHandle<Result<()>>> {
     let listener = match ipc::LocalSocketListener::bind(socket_name()) {
         Err(e) if e.kind() == ErrorKind::AddrInUse => {
             // TODO: detect if other instance of memoir is actually running
@@ -90,11 +83,11 @@ fn fork_ipc(
                 Check if {} is in use by another memoir process and try again.",
                 socket_name(),
             );
-            return Err(e);
+            return Err(anyhow!(e));
         }
         Err(e) => {
             eprint!("Error: could not start server: {}", e);
-            return Err(e);
+            return Err(anyhow!(e));
         }
         Ok(x) => x,
     };
@@ -103,14 +96,14 @@ fn fork_ipc(
     Ok(handle)
 }
 
-pub fn run_process_list_daemon(finish_rcv: Receiver<()>, history: ProcessHistory) {
+pub fn run_process_list_daemon(finish_rcv: Receiver<()>, history: ProcessHistory) -> Result<()> {
     let mut cache: HashSet<Arc<Process>> = HashSet::with_capacity(1000);
     let mut cleanup_tick = 0;
     // 1 second wait between process polls is done via recv() timeout
     while listing_should_continue(&finish_rcv, Duration::new(1, 0)) {
         cleanup_tick += 1;
         let mut locked = history.lock().unwrap();
-        locked.push_back(list_processes(&mut cache));
+        locked.push_back(list_processes(&mut cache)?);
         if locked.len() > HISTORY_CAPACITY {
             locked.pop_front();
         }
@@ -119,6 +112,7 @@ pub fn run_process_list_daemon(finish_rcv: Receiver<()>, history: ProcessHistory
             cache.retain(|c| Arc::strong_count(c) > 1);
         }
     }
+    Ok(())
 }
 
 fn listing_should_continue(finish_rcv: &Receiver<()>, timeout: Duration) -> bool {
@@ -132,9 +126,12 @@ fn listing_should_continue(finish_rcv: &Receiver<()>, timeout: Duration) -> bool
     }
 }
 
-fn ipc_listen(finish_snd: Sender<()>, listener: ipc::LocalSocketListener, history: ProcessHistory) {
+fn ipc_listen(
+    finish_snd: Sender<()>,
+    listener: ipc::LocalSocketListener,
+    history: ProcessHistory,
+) -> Result<()> {
     println!("daemon started");
-
     // Preemptively allocate a sizeable buffer for reading at a later moment. This size should be
     // enough and should be easy to find for the allocator. Since we only have one concurrent
     // client, there's no need to reallocate the buffer repeatedly.
@@ -172,28 +169,28 @@ fn ipc_listen(finish_snd: Sender<()>, listener: ipc::LocalSocketListener, histor
         if buffer.as_bytes() == Signal::Stop.as_cmdline() {
             finish_snd
                 .send(())
-                .expect("Error: could not send stop signal");
+                .context("Error: could not send stop signal")?;
             break;
         }
         if buffer.as_bytes() == Signal::Save.as_cmdline() {
             let mut len_buffer: [u8; 8] = [0; 8];
             reader
                 .read_exact(&mut len_buffer)
-                .expect("Error: could not read save argument length");
+                .context("Error: could not read save argument length")?;
             let arg_len = u64::from_be_bytes(len_buffer);
             let mut arg_buffer: Vec<u8> = vec![0; arg_len as usize];
             reader
                 .read_exact(&mut arg_buffer)
-                .expect("Error: could not read save argument");
+                .context("Error: could not read save argument")?;
             let arg = unsafe { OsString::from_encoded_bytes_unchecked(arg_buffer) };
             reader
                 .get_mut()
                 .write_all(&Signal::Ack.as_cmdline())
-                .expect("Error: could not write ack on arg");
+                .context("Error: could not write ack on arg")?;
 
             eprintln!("Saving current process info to {:?}...", arg);
             save_to_csv(&history.lock().unwrap(), &PathBuf::from(arg))
-                .expect("Could not dump process history to CSV");
+                .context("Could not dump process history to CSV")?;
         }
 
         // Clear the buffer so that the next iteration will display new data instead of messages
@@ -201,10 +198,11 @@ fn ipc_listen(finish_snd: Sender<()>, listener: ipc::LocalSocketListener, histor
         buffer.clear();
     }
     println!("daemon finished");
+    Ok(())
 }
 
 fn handle_ipc_connection_error(
-    conn: Result<ipc::LocalSocketStream>,
+    conn: std::io::Result<ipc::LocalSocketStream>,
 ) -> Option<ipc::LocalSocketStream> {
     match conn {
         Ok(c) => Some(c),

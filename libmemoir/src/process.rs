@@ -1,5 +1,7 @@
 use std::{collections::HashSet, sync::Arc, vec::Vec};
 
+use anyhow::{Context, Result};
+
 #[derive(Eq, Hash, PartialEq)]
 pub struct Process {
     pub pid: u32,
@@ -38,16 +40,16 @@ impl std::fmt::Display for CurrentProcesses {
 
 // List all processes that are currently running. Since most of pids and names will be repeated
 // between iterations, use a cache to avoid having tens of megabytes of same strings in memory.
-pub fn list_processes(process_cache: &mut HashSet<Arc<Process>>) -> CurrentProcesses {
+pub fn list_processes(process_cache: &mut HashSet<Arc<Process>>) -> Result<CurrentProcesses> {
     use std::time::{SystemTime, UNIX_EPOCH};
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards")
+        .context("Time went backwards! TODO: support timey-wimey stuff in memoir")?
         .as_millis();
-    CurrentProcesses {
+    Ok(CurrentProcesses {
         timestamp: now,
         entries: platform_specific::platform_list_processes(process_cache),
-    }
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -112,7 +114,6 @@ mod platform_specific {
     #![allow(non_snake_case)]
     use super::*;
     use serde::Deserialize;
-    use std::{collections::HashSet, sync::Arc};
 
     // needs to be named exactly like the entity in WMI
     #[derive(Deserialize, Debug)]
@@ -125,14 +126,21 @@ mod platform_specific {
 
     pub fn platform_list_processes(process_cache: &mut HashSet<Arc<Process>>) -> Vec<HistoryEntry> {
         let mut entries: Vec<HistoryEntry> = Vec::with_capacity(100);
-        let com_con = wmi::COMLibrary::new().expect("Could not acquire COM library");
-        let wmi_con =
-            wmi::WMIConnection::new(com_con.into()).expect("Could not establish WMI connection");
+        let com_con = wmi::COMLibrary::new().expect(
+            "Could not acquire COM library to query WMI.\n\
+            Either you are missing some privilegies, or something is broken in your system.",
+        );
+        let wmi_con = wmi::WMIConnection::new(com_con.into()).expect(
+            "Could not establish WMI connection.\n\
+            Either you are missing some privilegies, or something is broken in your system.",
+        );
         // TODO: Win32_Process.WorkingSetSize is not exactly what we need... Better join with
         // Win32_PerfRawData_PerfProc_Process on WP.ProcessId == WPRDPPP.IDProcess, and get
         // WorkingSetPrivate from there.
-        let result: Vec<Win32_Process> =
-            wmi_con.query().expect("Could not query WMI for processes");
+        let result: Vec<Win32_Process> = wmi_con.query().expect(
+            "Could not query WMI for processes.\n\
+                Either you are missing some privilegies, or something is broken in your system.",
+        );
         for r in result {
             // `Arc<T>` can be compared with `T`, so we can get ref-counted process from
             // cache by its "raw" structure.
@@ -152,6 +160,6 @@ mod platform_specific {
                 memory_mb: r.WorkingSetSize / 1_000_000,
             });
         }
-        return entries;
+        entries
     }
 }

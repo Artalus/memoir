@@ -88,8 +88,7 @@ pub fn do_run(as_daemon: bool) -> Result {
             tmp
         ))?;
     }
-    daemon::run_daemon();
-    Ok(())
+    daemon::run_daemon()
 }
 
 pub fn do_stop() -> Result {
@@ -111,10 +110,11 @@ pub fn do_status() -> Result {
     }
 }
 
-pub fn do_once() {
+pub fn do_once() -> Result {
     let mut cache: HashSet<std::sync::Arc<Process>> = HashSet::with_capacity(1000);
-    let lp = list_processes(&mut cache);
+    let lp = list_processes(&mut cache)?;
     println!("Processes: {}", lp);
+    Ok(())
 }
 
 pub fn do_save(to: &String) -> Result {
@@ -124,10 +124,7 @@ pub fn do_save(to: &String) -> Result {
     let parent = file.parent().unwrap();
     let parentname = parent.as_os_str().to_os_string();
     if !parent.exists() {
-        return Err(anyhow::Error::msg(format!(
-            "Directory {:?} does not exist",
-            &parentname
-        )));
+        return Err(anyhow!("Directory {:?} does not exist", &parentname));
     }
     let filename = file.as_os_str();
     println!("-- requesting save to {:?}", filename);
