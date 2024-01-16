@@ -18,9 +18,16 @@ enum Commands {
     Run {
         #[arg(short, long)]
         without_checks: bool,
+        /// how many entries / seconds of history to keep
+        #[arg(long, default_value_t = 3600)]
+        keep_history: usize,
     },
     /// start as a detached daemon
-    Detach,
+    Detach {
+        /// how many entries / seconds of history to keep
+        #[arg(long, default_value_t = 3600)]
+        keep_history: usize,
+    },
     /// stop a running daemon
     Stop,
     /// check if daemon is running
@@ -36,12 +43,12 @@ pub fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     match &args.command {
-        Commands::Once => {
-            memoir::control::do_once();
-            Ok(())
-        }
-        Commands::Detach => memoir::control::do_detach(),
-        Commands::Run { without_checks } => memoir::control::do_run(!without_checks),
+        Commands::Once => memoir::control::do_once(),
+        Commands::Detach { keep_history } => memoir::control::do_detach(keep_history.to_owned()),
+        Commands::Run {
+            without_checks,
+            keep_history,
+        } => memoir::control::do_run(!without_checks, keep_history.to_owned()),
         Commands::Stop => memoir::control::do_stop(),
         Commands::Status => memoir::control::do_status(),
         Commands::Save { path } => memoir::control::do_save(path),
