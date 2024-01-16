@@ -36,16 +36,14 @@ pub fn run_daemon() -> Result<()> {
 
 pub fn check_socket_status() -> Result<PingResult> {
     let socket_name = socket_name();
-    {
-        match ipc::LocalSocketListener::bind(socket_name.clone()) {
-            // if we could bind to socket, the daemon defo does not exist
-            Ok(_) => return Ok(PingResult::DaemonNotFound),
-            // if addr is in use, there might be a chance it is occupied by something alien
-            Err(e) if e.kind() == ErrorKind::AddrInUse => {}
-            // any other error might prevent us from binding to the socket later
-            Err(e) => {
-                return Err(e).context(format!("Unable to bind socket {}", socket_name));
-            }
+    match ipc::LocalSocketListener::bind(socket_name.clone()) {
+        // if we could bind to socket, the daemon defo does not exist
+        Ok(_) => return Ok(PingResult::DaemonNotFound),
+        // if addr is in use, there might be a chance it is occupied by something alien
+        Err(e) if is_bind_error_in_use(&e) => {}
+        // any other error might prevent us from binding to the socket later
+        Err(e) => {
+            return Err(e).context(format!("Unable to bind socket {}", socket_name));
         }
     }
     // attempt to ping the socket to ensure it is occupied by our daemon
@@ -69,6 +67,16 @@ pub fn check_socket_status() -> Result<PingResult> {
         return Ok(PingResult::DaemonExists);
     }
     Ok(PingResult::SocketOccupied)
+}
+
+/// Check whether error returned by `.bind()` matches "address is used by someone else".
+/// On Linux it is AddrInUse, but on Windows it is Access Denied (os error 5) - which
+/// is indistinguishable from a real error - so we always fail just in case.
+fn is_bind_error_in_use(_e: &std::io::Error) -> bool {
+    #[cfg(target_os = "windows")]
+    return false;
+    #[cfg(not(target_os = "windows"))]
+    return _e.kind() == ErrorKind::AddrInUse;
 }
 
 fn fork_ipc(
