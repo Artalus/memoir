@@ -557,6 +557,7 @@ dependencies = [
  "anyhow",
  "clap",
  "memoir",
+ "thiserror",
 ]
 
 [[package]]

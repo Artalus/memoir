@@ -20,12 +20,14 @@ enum Commands {
         without_checks: bool,
         /// how many entries / seconds of history to keep
         #[arg(long, default_value_t = 3600)]
+        #[arg(value_parser = parsetime::parse_time)]
         keep_history: usize,
     },
     /// start as a detached daemon
     Detach {
         /// how many entries / seconds of history to keep
         #[arg(long, default_value_t = 3600)]
+        #[arg(value_parser = parsetime::parse_time)]
         keep_history: usize,
     },
     /// stop a running daemon
@@ -54,3 +56,5 @@ pub fn main() -> anyhow::Result<()> {
         Commands::Save { path } => memoir::control::do_save(path),
     }
 }
+
+mod parsetime;
