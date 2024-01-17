@@ -10,17 +10,14 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-
+  lint:
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v3
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
-    - name: Linters
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: ubuntu-latest
+    - name: pre-commit linters
       run: |
         set -ex
         pip install pre-commit
@@ -38,11 +35,80 @@ jobs:
             --show-diff-on-failure \
             --all-files
         fi
-        # set +e
-        # cargo fix -- -DWarnings
-        # fix_code=$?
-        # cargo clippy -- -DWarnings
-        # clippy_code=$?
-        # if [ $fix_code -ne 0 ] || [ $clippy_code -ne 0 ]; then
-        #     exit 1
-        # fi
+
+  build-n-test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v3
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: ${{ matrix.os }}
+    - run: cargo build --verbose
+    - run: cargo test --verbose
+      env:
+        RUST_BACKTRACE: 1
+
+  minsizerel-windows:
+    needs: [lint, build-n-test]
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v3
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: windows-latest
+    - run: cargo build --profile minsizerel
+    - uses: actions/upload-artifact@v3
+      with:
+        name: minsizerel-windows
+        retention-days: 1
+        path: target/minsizerel/memoirctl.exe
+
+  minsizerel-debian:
+    needs: [lint, build-n-test]
+    runs-on: ubuntu-latest
+    container:
+      image: debian:10-slim
+    steps:
+    - uses: actions/checkout@v3
+    # no cache for us, glibc is too old in that image (:
+    - name: setup build environment
+      run: |
+        set -ex
+        apt update
+        # curl - for rustup
+        # binutils - for objdump
+        # ca-certificates - for curl to work with https
+        # gcc - for rust dependencies
+        apt install -y --no-install-recommends \
+          curl \
+          binutils \
+          ca-certificates
+        apt install -y \
+          gcc
+        curl --proto '=https' --tlsv1.3 https://sh.rustup.rs -o rustup.sh
+        chmod +x rustup.sh
+        ./rustup.sh -y
+        source "$HOME/.cargo/env"
+        rustup toolchain install stable-gnu
+        rustup default stable-gnu
+      shell: bash # for source
+    - run: |
+        source "$HOME/.cargo/env"
+        cargo build --profile minsizerel
+      shell: bash
+    - run: >
+        echo Minimum GLIBC version required:
+
+        objdump -T target/minsizerel/memoirctl
+        | grep GLIBC
+        | sed 's/.*GLIBC_\([.0-9]*\).*/\1/g'
+        | sort -Vu
+        | tail -1
+    - uses: actions/upload-artifact@v3
+      with:
+        name: "minsizerel-linux-glibc${{ steps.run_tests.outputs.glibc }}"
+        retention-days: 1
+        path: target/minsizerel/memoirctl
