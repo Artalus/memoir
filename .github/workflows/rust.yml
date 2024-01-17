@@ -10,17 +10,14 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-
+  lint:
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v3
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
-    - name: Linters
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: ubuntu-latest
+    - name: pre-commit linters
       run: |
         set -ex
         pip install pre-commit
@@ -38,11 +35,18 @@ jobs:
             --show-diff-on-failure \
             --all-files
         fi
-        # set +e
-        # cargo fix -- -DWarnings
-        # fix_code=$?
-        # cargo clippy -- -DWarnings
-        # clippy_code=$?
-        # if [ $fix_code -ne 0 ] || [ $clippy_code -ne 0 ]; then
-        #     exit 1
-        # fi
+
+  build-n-test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v3
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: ${{ matrix.os }}
+    - run: cargo build --verbose
+    - run: cargo test --verbose
+      env:
+        RUST_BACKTRACE: 1
