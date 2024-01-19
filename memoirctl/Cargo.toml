@@ -7,3 +7,4 @@ edition = "2021"
 memoir = { path = "../libmemoir" }
 anyhow = "1.0.79"
 clap = { version = "4.4.16", features = ["derive"] }
+thiserror = "1.0.56"

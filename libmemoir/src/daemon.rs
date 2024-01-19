@@ -15,7 +15,6 @@ use crate::ipc_common::{socket_name, Signal};
 use crate::process::{list_processes, CurrentProcesses, Process};
 
 type ProcessHistory = Arc<Mutex<VecDeque<CurrentProcesses>>>;
-const HISTORY_CAPACITY: usize = 3600;
 const CLEANUP_INTERVAL: usize = 100;
 
 pub enum PingResult {
@@ -25,12 +24,13 @@ pub enum PingResult {
 }
 
 /// Run a daemon-server listening to a LocalSocket. Blocks until the daemon is stopped.
-pub fn run_daemon() -> Result<()> {
-    let history = Arc::new(Mutex::new(VecDeque::with_capacity(HISTORY_CAPACITY)));
+pub fn run_daemon(history_capacity: usize) -> Result<()> {
+    eprintln!("Using history capacity of {history_capacity} seconds");
+    let history = Arc::new(Mutex::new(VecDeque::with_capacity(history_capacity)));
 
     let (snd, rcv) = std::sync::mpsc::channel();
     let ipc = fork_ipc(snd, history.clone()).context("Error: failed to setup IPC")?;
-    run_process_list_daemon(rcv, history.clone())?;
+    run_process_list_daemon(rcv, history.clone(), history_capacity)?;
     ipc.join().unwrap()
 }
 
@@ -96,7 +96,11 @@ fn fork_ipc(
     Ok(handle)
 }
 
-pub fn run_process_list_daemon(finish_rcv: Receiver<()>, history: ProcessHistory) -> Result<()> {
+pub fn run_process_list_daemon(
+    finish_rcv: Receiver<()>,
+    history: ProcessHistory,
+    history_capacity: usize,
+) -> Result<()> {
     let mut cache: HashSet<Arc<Process>> = HashSet::with_capacity(1000);
     let mut cleanup_tick = 0;
     // 1 second wait between process polls is done via recv() timeout
@@ -104,7 +108,7 @@ pub fn run_process_list_daemon(finish_rcv: Receiver<()>, history: ProcessHistory
         cleanup_tick += 1;
         let mut locked = history.lock().unwrap();
         locked.push_back(list_processes(&mut cache)?);
-        if locked.len() > HISTORY_CAPACITY {
+        if locked.len() > history_capacity {
             locked.pop_front();
         }
         if cleanup_tick >= CLEANUP_INTERVAL {

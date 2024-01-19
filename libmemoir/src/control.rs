@@ -11,7 +11,9 @@ use crate::{
 
 type Result = anyhow::Result<()>;
 
-pub fn do_detach() -> Result {
+/// Spawn a separate monitoring process, wait for it to successfully start and
+/// exit immediately leaving it in background.
+pub fn do_detach(history_capacity: usize) -> Result {
     match daemon::check_socket_status() {
         Ok(daemon::PingResult::DaemonExists) => {
             eprintln!("Daemon already active.");
@@ -28,7 +30,12 @@ pub fn do_detach() -> Result {
     let exe = std::env::current_exe().context("Could not get current executable path")?;
     let mut command = Command::new(exe);
     command
-        .args(["run", "--without-checks"])
+        .args([
+            "run",
+            "--without-checks",
+            "--history-size",
+            &history_capacity.to_string(),
+        ])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -82,7 +89,9 @@ pub fn do_detach() -> Result {
     Ok(())
 }
 
-pub fn do_run(as_daemon: bool) -> Result {
+/// Run the monitoring daemon, with one thread collecting process statistics and
+/// another listening on a local socket for communication from other memoirctl.
+pub fn do_run(as_daemon: bool, history_capacity: usize) -> Result {
     if as_daemon {
         match daemon::check_socket_status() {
             Ok(daemon::PingResult::DaemonExists) => return Err(anyhow!("Daemon already active.")),
@@ -98,7 +107,7 @@ pub fn do_run(as_daemon: bool) -> Result {
             tmp
         ))?;
     }
-    daemon::run_daemon()
+    daemon::run_daemon(history_capacity)
 }
 
 pub fn do_stop() -> Result {
