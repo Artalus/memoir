@@ -26,10 +26,20 @@ pub fn do_detach() -> Result {
 
     use std::process::Command;
     let exe = std::env::current_exe().context("Could not get current executable path")?;
-    let mut child = Command::new(exe)
+    let mut command = Command::new(exe);
+    command
         .args(["run", "--without-checks"])
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x000_000_08;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x000_002_00;
+        command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    }
+    let mut child = command
         .spawn()
         .context("Could not spawn child daemon process")?;
     let mut await_spawn_attempts = 0;
