@@ -1,11 +1,11 @@
-use std::{collections::HashSet, io::BufReader};
+use std::collections::HashSet;
 
 use anyhow::{anyhow, Context};
-use interprocess::local_socket as ipc;
+use interprocess::local_socket::LocalSocketStream;
 
 use crate::{
     daemon,
-    ipc_common::{socket_name, Signal},
+    ipc_common::{socket_name, SaveTo, Signal},
     process::{list_processes, Process},
 };
 
@@ -20,9 +20,6 @@ pub fn do_detach(history_capacity: usize) -> Result {
             return Ok(());
         }
         Ok(daemon::PingResult::DaemonNotFound) => {}
-        Ok(daemon::PingResult::SocketOccupied) => {
-            return Err(anyhow!("Socket bound to some other program."))
-        }
         Err(e) => return Err(e).context("Unexpected error during initial check"),
     }
 
@@ -71,7 +68,7 @@ pub fn do_detach(history_capacity: usize) -> Result {
         // give child 1ms to init
         std::thread::sleep(std::time::Duration::new(0, 1_000_000));
 
-        match communicate(Signal::Ping, b"") {
+        match communicate(Signal::Ping) {
             Ok(_) => break,
             Err(e) => {
                 // errors are allowed to occur at first, if the daemon hadn't yet bound
@@ -96,9 +93,6 @@ pub fn do_run(as_daemon: bool, history_capacity: usize) -> Result {
         match daemon::check_socket_status() {
             Ok(daemon::PingResult::DaemonExists) => return Err(anyhow!("Daemon already active.")),
             Ok(daemon::PingResult::DaemonNotFound) => {}
-            Ok(daemon::PingResult::SocketOccupied) => {
-                return Err(anyhow!("Socket bound to some other program."))
-            }
             Err(e) => return Err(e).context("Unexpected error during initial check"),
         }
         let tmp = std::env::temp_dir();
@@ -111,7 +105,7 @@ pub fn do_run(as_daemon: bool, history_capacity: usize) -> Result {
 }
 
 pub fn do_stop() -> Result {
-    communicate(Signal::Stop, b"")
+    communicate(Signal::Stop)
 }
 
 pub fn do_status() -> Result {
@@ -122,9 +116,6 @@ pub fn do_status() -> Result {
             Ok(())
         }
         Ok(daemon::PingResult::DaemonNotFound) => Err(anyhow!("Daemon not running.")),
-        Ok(daemon::PingResult::SocketOccupied) => {
-            Err(anyhow!("Socket bound to some other program."))
-        }
         Err(e) => Err(e).context("Unexpected error during ping"),
     }
 }
@@ -141,54 +132,27 @@ pub fn do_save(to: &String) -> Result {
         .context("Could not get current directory")?
         .join(to);
     let parent = file.parent().unwrap();
-    let parentname = parent.as_os_str().to_os_string();
+    let parentname = parent.as_os_str();
     if !parent.exists() {
         return Err(anyhow!("Directory {:?} does not exist", &parentname));
     }
-    let filename = file.as_os_str();
+    let filename = file.into_os_string().into_string().unwrap();
     println!("-- requesting save to {:?}", filename);
-    communicate(Signal::Save, filename.as_encoded_bytes())
+    communicate(Signal::Save {
+        to: SaveTo::File { name: filename },
+    })
 }
 
-fn communicate(signal: Signal, arg: &[u8]) -> Result {
-    let mut buffer = String::with_capacity(128);
-
+fn communicate(signal: Signal) -> Result {
     // block until server accepts connection, failing immediately if server hasn't started yet
-    let conn =
-        ipc::LocalSocketStream::connect(socket_name()).context("Connection to server failed")?;
-    let mut reader = BufReader::new(conn);
+    let mut conn =
+        LocalSocketStream::connect(socket_name()).context("Connection to server failed")?;
 
-    // to access write_all/read_line
-    use std::io::prelude::*;
-
-    reader
-        .get_mut()
-        .write_all(&signal.as_cmdline())
+    signal
+        .feed_into(&mut conn)
         .context("Writing signal to server failed")?;
 
-    // We now employ the buffer we allocated prior and read until EOF, which the server will
-    // similarly invoke with `.shutdown()`, verifying validity of UTF-8 on the fly.
-    reader
-        .read_line(&mut buffer)
-        .context("Reading server response failed")?;
-    // if buffer.as_bytes() == Signal::Ack.as_cmdline() {
-    println!("-- server answered: '{}'", buffer);
-
-    if !arg.is_empty() {
-        let arg_length = (arg.len() as u64).to_be_bytes();
-        reader
-            .get_mut()
-            .write(&arg_length)
-            .context("Could not write argument length to server")?;
-        reader
-            .get_mut()
-            .write(arg)
-            .context("Could not write argument to server")?;
-        reader
-            .read_line(&mut buffer)
-            .context("Reading server response to arg failed")?;
-        // if buffer.as_bytes() == Signal::Ack.as_cmdline() {
-        println!("-- server answered on arg: '{}'", buffer);
-    }
+    let response = Signal::read_from(&mut conn).context("Reading server response failed")?;
+    println!("-- server answered: '{response:?}'");
     Ok(())
 }
