@@ -1,5 +1,6 @@
 # See https://pre-commit.com for more information
 # See https://pre-commit.com/hooks.html for more hooks
+default_install_hook_types: [pre-commit, pre-push]
 repos:
 - repo: https://github.com/pre-commit/pre-commit-hooks
   rev: v4.5.0
@@ -11,13 +12,23 @@ repos:
   rev: v1.0
   hooks:
   - id: cargo-check
-    args: ["--color=always"]
   - id: clippy
-    args: ["--color=always"]
   - id: fmt
-    args: ["--", "--color=always"]
 - repo: https://github.com/python-jsonschema/check-jsonschema
   rev: 0.27.3
   hooks:
   - id: check-github-workflows
     args: ["--verbose"]
+- repo: local
+  hooks:
+  - id: cargo-test
+    stages: [push]
+    name: cargo test
+    description: Run Rust tests.
+    entry: cargo test
+    language: system
+    types: [rust]
+    # cargo cannot test single files
+    pass_filenames: false
+    # no need to run multiple cargo's for multiple files
+    require_serial: true

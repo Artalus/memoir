@@ -139,7 +139,7 @@ pub fn do_once() -> Result {
 pub fn do_save(to: &String) -> Result {
     let file = std::env::current_dir()
         .context("Could not get current directory")?
-        .join(&to);
+        .join(to);
     let parent = file.parent().unwrap();
     let parentname = parent.as_os_str().to_os_string();
     if !parent.exists() {
