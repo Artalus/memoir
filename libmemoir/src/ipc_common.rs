@@ -1,33 +1,34 @@
-use interprocess::local_socket as ipc;
+use anyhow::Context;
+use interprocess::local_socket::{LocalSocketStream, NameTypeSupport};
+use serde::{Deserialize, Serialize};
 
 pub fn socket_name() -> String {
-    use ipc::NameTypeSupport::*;
-    match ipc::NameTypeSupport::query() {
+    use NameTypeSupport::*;
+    match NameTypeSupport::query() {
         OnlyPaths => String::from("/tmp/memoirrs.sock"),
         OnlyNamespaced | Both => String::from("@memoirrs.sock"),
     }
 }
-
+#[derive(Serialize, Deserialize, Debug)]
+pub enum SaveTo {
+    File { name: String },
+}
+#[derive(Serialize, Deserialize, Debug)]
 pub enum Signal {
     Ack,
+    Error,
     Stop,
     Ping,
-    Save,
+    Save { to: SaveTo },
 }
-
-impl std::fmt::Display for Signal {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Signal::Ack => write!(f, "Ack"),
-            Signal::Stop => write!(f, "Stop"),
-            Signal::Ping => write!(f, "Ping"),
-            Signal::Save => write!(f, "Save"),
-        }
-    }
-}
-
 impl Signal {
-    pub fn as_cmdline(&self) -> Vec<u8> {
-        format!("{}\n", self).as_bytes().to_vec()
+    pub fn feed_into(self, into: &mut LocalSocketStream) -> anyhow::Result<()> {
+        let writer = std::io::BufWriter::new(into);
+        ciborium::into_writer(&self, writer).context("Failed to write signal to socket")
+    }
+
+    pub fn read_from(from: &mut LocalSocketStream) -> anyhow::Result<Signal> {
+        let reader = std::io::BufReader::new(from);
+        ciborium::from_reader(reader).context("Failed to read signal from socket")
     }
 }
