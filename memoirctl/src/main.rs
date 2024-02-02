@@ -38,6 +38,9 @@ enum Commands {
     Save {
         /// path to save to
         path: String,
+        /// how many entries / seconds of history to save (save everything, if not specified)
+        #[arg(value_parser = parsetime::parse_time)]
+        last: Option<usize>,
     },
 }
 
@@ -53,7 +56,7 @@ pub fn main() -> anyhow::Result<()> {
         } => memoir::control::do_run(!without_checks, keep_history.to_owned()),
         Commands::Stop => memoir::control::do_stop(),
         Commands::Status => memoir::control::do_status(),
-        Commands::Save { path } => memoir::control::do_save(path),
+        Commands::Save { path, last } => memoir::control::do_save(path, *last),
     }
 }
 

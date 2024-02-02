@@ -152,10 +152,10 @@ fn ipc_listen(
                     .context("Error: could not send stop signal")?;
                 break;
             }
-            Signal::Save { to } => match to {
+            Signal::Save { to, time_sec } => match to {
                 SaveTo::File { name } => {
                     eprintln!("Saving current process info to {:?}...", name);
-                    save_to_csv(&history.lock().unwrap(), &PathBuf::from(name))
+                    save_to_csv(&history.lock().unwrap(), &PathBuf::from(name), time_sec)
                         .context("Could not dump process history to CSV")?;
                 }
             },

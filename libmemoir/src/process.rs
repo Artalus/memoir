@@ -130,7 +130,7 @@ mod platform_specific {
             "Could not acquire COM library to query WMI.\n\
             Either you are missing some privilegies, or something is broken in your system.",
         );
-        let wmi_con = wmi::WMIConnection::new(com_con.into()).expect(
+        let wmi_con = wmi::WMIConnection::new(com_con).expect(
             "Could not establish WMI connection.\n\
             Either you are missing some privilegies, or something is broken in your system.",
         );
