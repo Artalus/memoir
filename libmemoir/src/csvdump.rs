@@ -8,11 +8,23 @@ use crate::process::CurrentProcesses;
 pub fn save_to_csv(
     history: &VecDeque<CurrentProcesses>,
     destination: &PathBuf,
+    time_sec: Option<usize>,
 ) -> anyhow::Result<()> {
     let mut writer = csv::WriterBuilder::new()
         .delimiter(b'\t')
         .from_path(destination)
         .context(format!("Could not create CSV writer for {:?}", destination))?;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let since = match time_sec {
+        Some(t) => {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .context("Time went backwards! TODO: support timey-wimey stuff in memoir")?
+                .as_millis()
+                - (t as u128 * 1_000)
+        }
+        None => 0,
+    };
     writer.write_record([
         "Iteration",
         "Timestamp",
@@ -22,6 +34,9 @@ pub fn save_to_csv(
         "Command line",
     ])?;
     for (iteration, processes) in history.iter().enumerate() {
+        if processes.timestamp < since {
+            continue;
+        }
         for entry in &processes.entries {
             writer.write_record(&[
                 (iteration + 1).to_string(),

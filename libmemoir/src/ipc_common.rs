@@ -19,7 +19,7 @@ pub enum Signal {
     Error,
     Stop,
     Ping,
-    Save { to: SaveTo },
+    Save { to: SaveTo, time_sec: Option<usize> },
 }
 impl Signal {
     pub fn feed_into(self, into: &mut LocalSocketStream) -> anyhow::Result<()> {

@@ -127,7 +127,7 @@ pub fn do_once() -> Result {
     Ok(())
 }
 
-pub fn do_save(to: &String) -> Result {
+pub fn do_save(to: &String, last: Option<usize>) -> Result {
     let file = std::env::current_dir()
         .context("Could not get current directory")?
         .join(to);
@@ -140,6 +140,7 @@ pub fn do_save(to: &String) -> Result {
     println!("-- requesting save to {:?}", filename);
     communicate(Signal::Save {
         to: SaveTo::File { name: filename },
+        time_sec: last,
     })
 }
 
