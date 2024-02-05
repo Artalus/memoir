@@ -28,7 +28,7 @@ pub fn do_detach(history_capacity: usize) -> Result<()> {
         .args([
             "run",
             "--without-checks",
-            "--history-size",
+            "--keep-history",
             &history_capacity.to_string(),
         ])
         .stdin(std::process::Stdio::null())
