@@ -42,6 +42,12 @@ enum Commands {
         #[arg(value_parser = parsetime::parse_time)]
         last: Option<usize>,
     },
+    /// forward collected RAM report to stdout
+    Dump {
+        /// how many entries / seconds of history to save (save everything, if not specified)
+        #[arg(value_parser = parsetime::parse_time)]
+        last: Option<usize>,
+    },
 }
 
 pub fn main() -> anyhow::Result<()> {
@@ -57,6 +63,7 @@ pub fn main() -> anyhow::Result<()> {
         Commands::Stop => memoir::control::do_stop(),
         Commands::Status => memoir::control::do_status(),
         Commands::Save { path, last } => memoir::control::do_save(path, *last),
+        Commands::Dump { last } => memoir::control::do_dump(*last),
     }
 }
 
