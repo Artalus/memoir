@@ -12,6 +12,7 @@ pub fn socket_name() -> String {
 #[derive(Serialize, Deserialize, Debug)]
 pub enum SaveTo {
     File { name: String },
+    Stdout,
 }
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Signal {
@@ -20,6 +21,7 @@ pub enum Signal {
     Stop,
     Ping,
     Save { to: SaveTo, time_sec: Option<usize> },
+    Output { output: String },
 }
 impl Signal {
     pub fn feed_into(self, into: &mut LocalSocketStream) -> anyhow::Result<()> {

@@ -9,7 +9,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use interprocess::local_socket::{LocalSocketListener, LocalSocketStream};
 
-use crate::csvdump::save_to_csv;
+use crate::csvdump;
 use crate::ipc_common::{socket_name, SaveTo, Signal};
 use crate::process::{list_processes, CurrentProcesses, Process};
 
@@ -155,8 +155,19 @@ fn ipc_listen(
             Signal::Save { to, time_sec } => match to {
                 SaveTo::File { name } => {
                     eprintln!("Saving current process info to {:?}...", name);
-                    save_to_csv(&history.lock().unwrap(), &PathBuf::from(name), time_sec)
-                        .context("Could not dump process history to CSV")?;
+                    csvdump::save_to_file(&history.lock().unwrap(), &PathBuf::from(name), time_sec)
+                        .context("Could not dump process history to CSV file")?;
+                }
+                SaveTo::Stdout => {
+                    let mut buffer = Vec::new();
+                    let writer = std::io::BufWriter::new(&mut buffer);
+                    csvdump::save_to_stream(&history.lock().unwrap(), writer, time_sec)
+                        .context("Could not dump process history to buffer")?;
+                    Signal::Output {
+                        output: std::str::from_utf8(buffer.as_slice()).unwrap().to_string(),
+                    }
+                    .feed_into(&mut conn)
+                    .context("Could not feed dump into connection")?;
                 }
             },
             x => {

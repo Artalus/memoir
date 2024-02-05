@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, Context, Result};
 use interprocess::local_socket::LocalSocketStream;
 
 use crate::{
@@ -9,11 +9,9 @@ use crate::{
     process::{list_processes, Process},
 };
 
-type Result = anyhow::Result<()>;
-
 /// Spawn a separate monitoring process, wait for it to successfully start and
 /// exit immediately leaving it in background.
-pub fn do_detach(history_capacity: usize) -> Result {
+pub fn do_detach(history_capacity: usize) -> Result<()> {
     match daemon::check_socket_status() {
         Ok(daemon::PingResult::DaemonExists) => {
             eprintln!("Daemon already active.");
@@ -88,7 +86,7 @@ pub fn do_detach(history_capacity: usize) -> Result {
 
 /// Run the monitoring daemon, with one thread collecting process statistics and
 /// another listening on a local socket for communication from other memoirctl.
-pub fn do_run(as_daemon: bool, history_capacity: usize) -> Result {
+pub fn do_run(as_daemon: bool, history_capacity: usize) -> Result<()> {
     if as_daemon {
         match daemon::check_socket_status() {
             Ok(daemon::PingResult::DaemonExists) => return Err(anyhow!("Daemon already active.")),
@@ -104,11 +102,11 @@ pub fn do_run(as_daemon: bool, history_capacity: usize) -> Result {
     daemon::run_daemon(history_capacity)
 }
 
-pub fn do_stop() -> Result {
+pub fn do_stop() -> Result<()> {
     communicate(Signal::Stop)
 }
 
-pub fn do_status() -> Result {
+pub fn do_status() -> Result<()> {
     // TODO: this is more complex than just ping, rename to `status` or smth
     match daemon::check_socket_status() {
         Ok(daemon::PingResult::DaemonExists) => {
@@ -120,14 +118,14 @@ pub fn do_status() -> Result {
     }
 }
 
-pub fn do_once() -> Result {
+pub fn do_once() -> Result<()> {
     let mut cache: HashSet<std::sync::Arc<Process>> = HashSet::with_capacity(1000);
     let lp = list_processes(&mut cache)?;
     println!("Processes: {}", lp);
     Ok(())
 }
 
-pub fn do_save(to: &String, last: Option<usize>) -> Result {
+pub fn do_save(to: &String, last: Option<usize>) -> Result<()> {
     let file = std::env::current_dir()
         .context("Could not get current directory")?
         .join(to);
@@ -144,16 +142,55 @@ pub fn do_save(to: &String, last: Option<usize>) -> Result {
     })
 }
 
-fn communicate(signal: Signal) -> Result {
-    // block until server accepts connection, failing immediately if server hasn't started yet
-    let mut conn =
-        LocalSocketStream::connect(socket_name()).context("Connection to server failed")?;
-
-    signal
-        .feed_into(&mut conn)
-        .context("Writing signal to server failed")?;
-
-    let response = Signal::read_from(&mut conn).context("Reading server response failed")?;
-    println!("-- server answered: '{response:?}'");
+pub fn do_dump(last: Option<usize>) -> Result<()> {
+    println!("-- requesting dump");
+    let mut conn = connect()?;
+    send(
+        Signal::Save {
+            to: SaveTo::Stdout,
+            time_sec: last,
+        },
+        &mut conn,
+    )?;
+    let r = receive(&mut conn)?;
+    match r {
+        Signal::Ack => {}
+        x => return Err(anyhow!("Unexpected response signal #1 {x:?}")),
+    }
+    let r = receive(&mut conn)?;
+    match r {
+        Signal::Output { output } => {
+            println!("{}", output);
+        }
+        x => return Err(anyhow!("Unexpected response signal #2 {x:?}")),
+    }
     Ok(())
+}
+
+fn connect() -> anyhow::Result<LocalSocketStream> {
+    LocalSocketStream::connect(socket_name()).context("Connection to server failed")
+}
+
+fn send(signal: Signal, conn: &mut LocalSocketStream) -> Result<()> {
+    signal
+        .feed_into(conn)
+        .context("Writing signal to server failed")
+}
+
+fn receive(conn: &mut LocalSocketStream) -> Result<Signal> {
+    let response = Signal::read_from(conn).context("Reading server response failed")?;
+    Ok(response)
+}
+
+fn communicate(signal: Signal) -> Result<()> {
+    let mut c = connect()?;
+    send(signal, &mut c)?;
+    match receive(&mut c) {
+        Ok(s) => match s {
+            Signal::Ack => Ok(()),
+            Signal::Error => Err(anyhow!("Daemon returned error at communication")),
+            x => Err(anyhow!("Unexpected response signal from daemon: {x:?}")),
+        },
+        Err(e) => Err(e).context("Could receive response from daemon"),
+    }
 }

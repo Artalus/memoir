@@ -5,15 +5,34 @@ use anyhow::Context;
 
 use crate::process::CurrentProcesses;
 
-pub fn save_to_csv(
+pub fn save_to_file(
     history: &VecDeque<CurrentProcesses>,
     destination: &PathBuf,
     time_sec: Option<usize>,
 ) -> anyhow::Result<()> {
-    let mut writer = csv::WriterBuilder::new()
+    let writer = csv::WriterBuilder::new()
         .delimiter(b'\t')
         .from_path(destination)
         .context(format!("Could not create CSV writer for {:?}", destination))?;
+    save_to(history, writer, time_sec)
+}
+
+pub fn save_to_stream<W: std::io::Write>(
+    history: &VecDeque<CurrentProcesses>,
+    writer: W,
+    time_sec: Option<usize>,
+) -> anyhow::Result<()> {
+    let writer = csv::WriterBuilder::new()
+        .delimiter(b'\t')
+        .from_writer(writer);
+    save_to(history, writer, time_sec)
+}
+
+fn save_to<W: std::io::Write>(
+    history: &VecDeque<CurrentProcesses>,
+    mut writer: csv::Writer<W>,
+    time_sec: Option<usize>,
+) -> anyhow::Result<()> {
     use std::time::{SystemTime, UNIX_EPOCH};
     let since = match time_sec {
         Some(t) => {
