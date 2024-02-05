@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 use anyhow::{anyhow, Context, Result};
 use interprocess::local_socket::LocalSocketStream;
@@ -107,7 +107,6 @@ pub fn do_stop() -> Result<()> {
 }
 
 pub fn do_status() -> Result<()> {
-    // TODO: this is more complex than just ping, rename to `status` or smth
     match daemon::check_socket_status() {
         Ok(daemon::PingResult::DaemonExists) => {
             eprintln!("Daemon active.");
@@ -121,7 +120,12 @@ pub fn do_status() -> Result<()> {
 pub fn do_once() -> Result<()> {
     let mut cache: HashSet<std::sync::Arc<Process>> = HashSet::with_capacity(1000);
     let lp = list_processes(&mut cache)?;
-    println!("Processes: {}", lp);
+    let vd = VecDeque::from([lp]);
+    let mut buffer = Vec::new();
+    let writer = std::io::BufWriter::new(&mut buffer);
+    crate::csvdump::save_to_stream(&vd, writer, None)
+        .context("Could not dump process history to buffer")?;
+    println!("{}", std::str::from_utf8(buffer.as_slice()).unwrap());
     Ok(())
 }
 
