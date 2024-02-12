@@ -17,7 +17,7 @@ pub enum SaveTo {
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Signal {
     Ack,
-    Error,
+    Error { explanation: String },
     Stop,
     Ping,
     Save { to: SaveTo, time_sec: Option<usize> },

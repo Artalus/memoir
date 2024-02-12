@@ -1,3 +1,4 @@
+use std::borrow::BorrowMut;
 use std::collections::{HashSet, VecDeque};
 use std::io::ErrorKind;
 use std::path::PathBuf;
@@ -133,9 +134,11 @@ fn ipc_listen(
             Signal::read_from(&mut conn).context("Could not read signal from connection");
         if received.is_err() {
             let mut uw = received.unwrap_err();
-            let feed_result = Signal::Error
-                .feed_into(&mut conn)
-                .context("Also could not respond with error to connection");
+            let feed_result = Signal::Error {
+                explanation: format!("{uw:?}"),
+            }
+            .feed_into(&mut conn)
+            .context("Also could not respond with error to connection");
             if feed_result.is_err() {
                 uw = uw.context(feed_result.unwrap_err());
             }
@@ -159,15 +162,72 @@ fn ipc_listen(
                         .context("Could not dump process history to CSV file")?;
                 }
                 SaveTo::Stdout => {
-                    let mut buffer = Vec::new();
-                    let writer = std::io::BufWriter::new(&mut buffer);
-                    csvdump::save_to_stream(&history.lock().unwrap(), writer, time_sec)
-                        .context("Could not dump process history to buffer")?;
-                    Signal::Output {
-                        output: std::str::from_utf8(buffer.as_slice()).unwrap().to_string(),
+                    let hss = history.lock().unwrap();
+                    let mut iterator = crate::csvdump::iterator_on_buffer(hss.iter(), time_sec);
+
+                    // this is so wrong on so many levels, but after 8 hours i just give up on rust
+                    unsafe fn very_bad_function<T>(reference: &T) -> &mut T {
+                        let const_ptr = reference as *const T;
+                        let mut_ptr = const_ptr as *mut T;
+                        &mut *mut_ptr
                     }
-                    .feed_into(&mut conn)
-                    .context("Could not feed dump into connection")?;
+
+                    // need a frolicking raw `loop`, as `for x in i` will cause Rust to
+                    // `into_iter(i)`, moving its contents away and making .writer inaccessible
+                    loop {
+                        match iterator.next() {
+                            None => break,
+                            Some(chunk) => {
+                                match chunk {
+                                    Ok(()) => {}
+                                    Err(e) => {
+                                        let res: Result<()> =
+                                            Err(e).context("Iteration over process list failed");
+                                        let feed = Signal::Error {
+                                            e: res.unwrap_err(),
+                                        }
+                                        .feed_into(&mut conn)
+                                        .context("Could not feed error into connection");
+                                        match &feed {
+                                            Ok(()) => {}
+                                            Err(e) => {
+                                                eprintln!("ERROR: {e:?}");
+                                            }
+                                        }
+                                        feed?;
+                                    }
+                                };
+                                let writer = iterator.writer.borrow_mut();
+                                writer.flush()?;
+                                let cursor = writer.get_ref();
+                                let content = {
+                                    let huher = cursor.get_ref();
+                                    std::str::from_utf8(huher.as_slice()).unwrap().to_string()
+                                };
+                                println!("{}", content);
+                                unsafe {
+                                    let cursor2 = very_bad_function(cursor);
+                                    cursor2.set_position(0);
+                                };
+                                if bad_stuff.is_some() {
+                                    return bad_stuff.unwrap();
+                                }
+                            }
+                        }
+                    }
+                    // for chunk in iterator {
+                    //     let feed = Signal::Output {
+                    //         output: std::str::from_utf8(buffer.as_slice()).unwrap().to_string(),
+                    //     }
+                    //     .feed_into(&mut conn)
+                    //     .context("Could not feed dump into connection");
+                    //     match feed {
+                    //         Ok(()) => {}
+                    //         Err(e) => {
+                    //             eprintln!("Could not dump process history into connection");
+                    //         }
+                    //     }
+                    // }
                 }
             },
             x => {

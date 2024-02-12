@@ -1,4 +1,7 @@
-use std::collections::{HashSet, VecDeque};
+use std::{
+    borrow::BorrowMut,
+    collections::{HashSet, VecDeque},
+};
 
 use anyhow::{anyhow, Context, Result};
 use interprocess::local_socket::LocalSocketStream;
@@ -118,14 +121,68 @@ pub fn do_status() -> Result<()> {
 }
 
 pub fn do_once() -> Result<()> {
+    // {
+    //     let buffer: Vec<u8> = Vec::with_capacity(100);
+    //     let cursor = std::io::Cursor::new(buffer);
+    //     let mut ccc = csv::WriterBuilder::new().from_writer(cursor);
+    //     ccc.write_record(["Something", "1"]).expect("written");
+    //     {
+    //         ccc.flush();
+    //         let x = ccc.get_ref();
+    //         println!("{}", std::str::from_utf8(x.get_ref().as_slice()).unwrap());
+    //     }
+    //     ccc.write_record(["Else", "2"]).expect("written");
+    //     {
+    //         ccc.flush();
+    //         let x = ccc.get_ref();
+    //         println!("{}", std::str::from_utf8(x.get_ref().as_slice()).unwrap());
+    //     }
+    //     return Ok(());
+    // }
     let mut cache: HashSet<std::sync::Arc<Process>> = HashSet::with_capacity(1000);
     let lp = list_processes(&mut cache)?;
     let vd = VecDeque::from([lp]);
-    let mut buffer = Vec::new();
-    let writer = std::io::BufWriter::new(&mut buffer);
-    crate::csvdump::save_to_stream(&vd, writer, None)
-        .context("Could not dump process history to buffer")?;
-    println!("{}", std::str::from_utf8(buffer.as_slice()).unwrap());
+    let mut iterator = crate::csvdump::iterator_on_buffer(vd.iter(), None);
+
+    // this is so wrong on so many levels, but after 8 hours i just give up on rust
+    unsafe fn very_bad_function<T>(reference: &T) -> &mut T {
+        let const_ptr = reference as *const T;
+        let mut_ptr = const_ptr as *mut T;
+        &mut *mut_ptr
+    }
+
+    // need a frolicking raw `loop`, as `for x in i` will cause Rust to `into_iter(i)`, moving its
+    // contents away and making .writer inaccessible
+    loop {
+        match iterator.next() {
+            None => break,
+            Some(chunk) => {
+                let bad_stuff = match chunk {
+                    Ok(()) => None,
+                    Err(e) => {
+                        let e: Result<()> = Err(e).context("Iteration over process list failed");
+                        eprintln!("ERROR: {e:?}\nDo not trust the output below");
+                        Some(e)
+                    }
+                };
+                let writer = iterator.writer.borrow_mut();
+                writer.flush()?;
+                let cursor = writer.get_ref();
+                let content = {
+                    let huher = cursor.get_ref();
+                    std::str::from_utf8(huher.as_slice()).unwrap().to_string()
+                };
+                println!("{}", content);
+                unsafe {
+                    let cursor2 = very_bad_function(cursor);
+                    cursor2.set_position(0);
+                };
+                if bad_stuff.is_some() {
+                    return bad_stuff.unwrap();
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -192,7 +249,9 @@ fn communicate(signal: Signal) -> Result<()> {
     match receive(&mut c) {
         Ok(s) => match s {
             Signal::Ack => Ok(()),
-            Signal::Error => Err(anyhow!("Daemon returned error at communication")),
+            Signal::Error { explanation } => Err(anyhow!(
+                "Daemon returned error at communication:\n{explanation}"
+            )),
             x => Err(anyhow!("Unexpected response signal from daemon: {x:?}")),
         },
         Err(e) => Err(e).context("Could receive response from daemon"),
